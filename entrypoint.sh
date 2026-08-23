@@ -16,13 +16,17 @@ download_if_missing() {
   local file="$1" dest="$2"
   if [ ! -f "$dest" ]; then
     echo "[qwen3.8-27b] Downloading $MODEL_REPO/$file -> $dest"
-    curl -v -fL --connect-timeout 20 "https://huggingface.co/$MODEL_REPO/resolve/main/$file" -o "$dest.part"
-    rc=$?
-    echo "[qwen3.8-27b] curl exit code: $rc"
-    if [ "$rc" -eq 0 ]; then
+    # --speed-limit/--speed-time abort a stalled transfer (seen in practice:
+    # TLS connects and headers arrive fine, but body data never flows on some
+    # CDN edges) instead of hanging forever with no timeout signal; --retry
+    # with -C - then resumes on a fresh connection, which usually routes to a
+    # different, healthy CDN edge.
+    if curl -fL --connect-timeout 20 --speed-limit 524288 --speed-time 20 \
+         --retry 20 --retry-delay 5 --retry-all-errors -C - \
+         "https://huggingface.co/$MODEL_REPO/resolve/main/$file" -o "$dest.part"; then
       mv "$dest.part" "$dest"
     else
-      echo "[qwen3.8-27b] ERROR: failed to download $file (curl exit $rc)" >&2
+      echo "[qwen3.8-27b] ERROR: failed to download $file" >&2
       rm -f "$dest.part"
       exit 1
     fi
