@@ -16,10 +16,13 @@ download_if_missing() {
   local file="$1" dest="$2"
   if [ ! -f "$dest" ]; then
     echo "[qwen3.8-27b] Downloading $MODEL_REPO/$file -> $dest"
-    if curl -fL "https://huggingface.co/$MODEL_REPO/resolve/main/$file" -o "$dest.part"; then
+    curl -v -fL --connect-timeout 20 "https://huggingface.co/$MODEL_REPO/resolve/main/$file" -o "$dest.part"
+    rc=$?
+    echo "[qwen3.8-27b] curl exit code: $rc"
+    if [ "$rc" -eq 0 ]; then
       mv "$dest.part" "$dest"
     else
-      echo "[qwen3.8-27b] ERROR: failed to download $file" >&2
+      echo "[qwen3.8-27b] ERROR: failed to download $file (curl exit $rc)" >&2
       rm -f "$dest.part"
       exit 1
     fi
