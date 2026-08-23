@@ -14,25 +14,36 @@ mkdir -p "$MODELS_DIR"
 
 download_if_missing() {
   local file="$1" dest="$2"
-  if [ ! -f "$dest" ]; then
-    echo "[qwen3.8-27b] Downloading $MODEL_REPO/$file -> $dest"
-    # --speed-limit/--speed-time abort a stalled transfer (seen in practice:
-    # TLS connects and headers arrive fine, but body data never flows on some
-    # CDN edges) instead of hanging forever with no timeout signal; --retry
-    # with -C - then resumes on a fresh connection, which usually routes to a
-    # different, healthy CDN edge.
-    if curl -fL --connect-timeout 20 --speed-limit 524288 --speed-time 20 \
-         --retry 20 --retry-delay 5 --retry-all-errors -C - \
-         "https://huggingface.co/$MODEL_REPO/resolve/main/$file" -o "$dest.part"; then
-      mv "$dest.part" "$dest"
-    else
-      echo "[qwen3.8-27b] ERROR: failed to download $file" >&2
-      rm -f "$dest.part"
-      exit 1
-    fi
-  else
+  if [ -f "$dest" ]; then
     echo "[qwen3.8-27b] Already present: $dest"
+    return
   fi
+
+  echo "[qwen3.8-27b] Downloading $MODEL_REPO/$file -> $dest"
+  local url="https://huggingface.co/$MODEL_REPO/resolve/main/$file"
+  # curl's own --speed-limit/--retry proved unreliable against a real stall
+  # seen in practice (TLS connects, headers arrive with the correct
+  # content-length, then body data never flows on some CDN edges — curl just
+  # hangs instead of aborting). Drive the retry loop from bash instead: cap
+  # each attempt hard with --max-time, and resume with -C - so a short,
+  # frequently-interrupted attempt still makes cumulative progress once it
+  # lands on a healthy edge.
+  local attempt=1 max_attempts=40
+  while [ "$attempt" -le "$max_attempts" ]; do
+    echo "[qwen3.8-27b] Attempt $attempt/$max_attempts: $file"
+    if curl -fL --connect-timeout 15 --max-time 30 -C - "$url" -o "$dest.part"; then
+      mv "$dest.part" "$dest"
+      echo "[qwen3.8-27b] Download complete: $dest"
+      return
+    fi
+    echo "[qwen3.8-27b] Attempt $attempt failed (curl exit $?)"
+    sleep 3
+    attempt=$((attempt + 1))
+  done
+
+  echo "[qwen3.8-27b] ERROR: failed to download $file after $max_attempts attempts" >&2
+  rm -f "$dest.part"
+  exit 1
 }
 
 download_if_missing "Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf" "$MODEL_FILE"
