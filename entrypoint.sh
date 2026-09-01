@@ -20,29 +20,25 @@ download_if_missing() {
   fi
 
   echo "[qwen3.8-27b] Downloading $MODEL_REPO/$file -> $dest"
-  local url="https://huggingface.co/$MODEL_REPO/resolve/main/$file"
-  # curl's own --speed-limit/--retry proved unreliable against a real stall
-  # seen in practice (TLS connects, headers arrive with the correct
-  # content-length, then body data never flows on some CDN edges — curl just
-  # hangs instead of aborting). Drive the retry loop from bash instead: cap
-  # each attempt hard with --max-time, and resume with -C - so a short,
-  # frequently-interrupted attempt still makes cumulative progress once it
-  # lands on a healthy edge.
-  local attempt=1 max_attempts=40
+  # hf download stages into HF's local cache and only materializes the file
+  # at --local-dir once the transfer completes, so a partial/interrupted
+  # attempt never leaves a corrupt file at $dest (no .part/mv dance needed).
+  # HF_HUB_ENABLE_HF_TRANSFER=1 (set in the Dockerfile) switches this to
+  # hf_transfer's chunked, multi-connection backend instead of a single
+  # HTTP GET, which is what actually fixes the slow/stalling curl transfers.
+  local attempt=1 max_attempts=10
   while [ "$attempt" -le "$max_attempts" ]; do
     echo "[qwen3.8-27b] Attempt $attempt/$max_attempts: $file"
-    if curl -fL --connect-timeout 15 --max-time 30 -C - "$url" -o "$dest.part"; then
-      mv "$dest.part" "$dest"
+    if hf download "$MODEL_REPO" "$file" --local-dir "$MODELS_DIR"; then
       echo "[qwen3.8-27b] Download complete: $dest"
       return
     fi
-    echo "[qwen3.8-27b] Attempt $attempt failed (curl exit $?)"
-    sleep 3
+    echo "[qwen3.8-27b] Attempt $attempt failed"
+    sleep 5
     attempt=$((attempt + 1))
   done
 
   echo "[qwen3.8-27b] ERROR: failed to download $file after $max_attempts attempts" >&2
-  rm -f "$dest.part"
   exit 1
 }
 
