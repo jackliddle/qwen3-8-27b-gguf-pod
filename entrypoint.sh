@@ -51,7 +51,13 @@ echo "[qwen3.8-27b] Models ready. Starting llama-server on :8000"
 # across recent llama.cpp releases (upstream MTP support is new, merged
 # ~May 2026). Verify these against `llama-server --help` in this image's
 # actual build (server-cuda13-b10524) before relying on this in production.
-exec llama-server \
+#
+# Full path required: the base image's "server" stage copies the binary to
+# /app/llama-server and points its own ENTRYPOINT at that exact path, but
+# never adds /app to $PATH, so a bare `exec llama-server` fails with
+# "not found" (confirmed live 2026-09-01 — every earlier attempt had always
+# died during the slow curl download, before ever reaching this line).
+exec /app/llama-server \
   --model "$MODEL_FILE" \
   --mmproj "$MMPROJ_FILE" \
   --host 0.0.0.0 \
