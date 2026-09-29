@@ -15,7 +15,8 @@ RunPod GPU pod (ghcr.io/jackliddle/model-pod)
 ```
 
 Engines: **llama.cpp** (GGUF), **vLLM** (HF safetensors/AWQ/FP8) and
-**Ollama**. Several models can run at once if VRAM allows. The supervisor
+**Ollama** for LLMs, plus headless **ComfyUI** for image models (Qwen-Image,
+Krea 2, Qwen-Image-Edit; see [Image models](#image-models)). Several models can run at once if VRAM allows. The supervisor
 checks each recipe's `vram_gb` against free VRAM before deploying.
 
 ## Quick start
@@ -72,6 +73,58 @@ then the repo's `main` branch (re-fetched at startup and by the UI's
 **Refresh** button, via `RECIPES_REPO`), then recipes pushed at runtime
 (**Add recipe** / `mp push`). A new recipe never needs an image rebuild.
 
+## Image models
+
+Image recipes use `engine: comfyui`. The supervisor runs one headless ComfyUI
+(no UI exposed, started on the first image deploy and stopped with the last),
+which loads and swaps models per job, so several image models can be deployed
+at once. Each recipe downloads Comfy-Org's fp8 repackages and links them into
+ComfyUI as `<recipe-id>/<file>`, so recipes never clash over shared filenames.
+
+| Recipe | Model | Notes |
+|---|---|---|
+| `krea-2-turbo` | Krea 2 Turbo fp8, 8 steps | 9 optional style LoRAs. Krea community licence. |
+| `krea-2-raw` | Krea 2 Raw fp8, 52 steps, cfg 3.5 | Undistilled base. Same LoRAs. |
+| `qwen-image-2512` | Qwen-Image-2512 fp8 | `fast` = 4-step Lightning LoRA. |
+| `qwen-image-edit-2511` | Qwen-Image-Edit-2511 fp8 | Instruction editing of one input image; `fast` as above. |
+
+**API**, on the same base URL and key as the LLMs:
+
+```bash
+# OpenAI-compatible (synchronous: fine for Turbo/Lightning renders)
+curl $BASE/v1/images/generations -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"model": "krea-2-turbo", "prompt": "a red fox in the snow", "size": "1024x1024",
+       "seed": 42, "loras": [{"name": "neondrip", "strength": 0.8}]}'
+curl $BASE/v1/images/edits -H "Authorization: Bearer $KEY" \
+  -F model=qwen-image-edit-2511 -F image=@in.png -F prompt="make it night time"
+
+# Async jobs: anything that might exceed RunPod's ~100s proxy timeout
+curl $BASE/api/images/jobs -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"model": "qwen-image-2512", "prompt": "...", "params": {"fast": false}}'   # -> {"job_id": ...}
+curl $BASE/api/images/jobs/<job_id> -H "Authorization: Bearer $KEY"             # -> status, images[].url
+```
+
+- **Extra request fields:** `negative_prompt`, `seed`, `steps`, `cfg`,
+  `loras`, `params` (recipe param overrides such as `fast`), and `image_b64`
+  (for jobs on edit models). Responses include the `seed` used.
+- **LoRAs:** pick them in the deploy dialog (or `mp deploy krea-2-turbo --set
+  loras=neondrip,darkbrush`); only selected ones are downloaded. A style
+  LoRA's trigger phrase is appended to the prompt automatically.
+- **Result URLs** (`/api/images/files/...`) need no key: each name contains a
+  random 128-bit job id. They last until the pod is terminated.
+
+**Adding an image model** means a recipe plus a ComfyUI API-format workflow
+in `recipes/workflows/`. In ComfyUI, *Export (API)* a working workflow, or
+adapt one of ComfyUI's built-in templates. The recipe then lists:
+- `comfy_files`: repo, file, and the ComfyUI model folder for each file.
+- `inputs`: which node/input each request field sets. List several targets
+  when a value exists once per branch, e.g. steps behind the Lightning switch.
+- `lora_insert.model_node`: where LoRA chains are spliced in.
+
+On deploy the workflow is checked against ComfyUI's `/object_info`, which
+catches unknown node types and wrong filenames before "ready". A warm-up
+generation then loads the weights.
+
 ## CLI: `mp`
 
 `mp` is installed on the pod, or run it locally from `supervisor/` with
@@ -83,7 +136,9 @@ mp status                         GPU / disk / URLs
 mp recipes                        list recipes
 mp push my-model.yaml             add or replace a runtime recipe
 mp deploy <id> [--set k=v] --wait deploy and block until ready (prints connection info)
-mp test <id>                      smoke suite: models, chat, stream + vision/tools/reasoning per capabilities
+mp test <id> [--save DIR]         smoke suite: LLMs: models, chat, stream + vision/tools/reasoning;
+                                  images: generate, async job, a LoRA, edits (images saved to DIR)
+mp gen <model> "prompt" -o x.png  one image via the job API [--size --steps --seed --lora n:0.8 --image in.png --set fast=true]
 mp logs <id> [-f]                 engine / download logs
 mp endpoints [<id>]               copy-pasteable env vars + curl
 mp stop <id> [--keep-files]       stop; deletes the model files by default
@@ -94,8 +149,9 @@ mp restart <id>                   same params, keeps files
 
 ```bash
 cd supervisor && poetry install
-MP_DEV=1 API_KEY=dev MODELS_DIR=/tmp/mp/models LOCAL_RECIPES_DIR=/tmp/mp/recipes \
-  poetry run uvicorn app.main:app --port 8000     # dev mode adds a fake echo engine
+MP_DEV=1 COMFYUI_FAKE=1 API_KEY=dev MODELS_DIR=/tmp/mp/models LOCAL_RECIPES_DIR=/tmp/mp/recipes \
+  COMFY_ROOT=/tmp/mp/comfy poetry run uvicorn app.main:app --port 8000
+  # dev mode adds fake engines: an echo LLM, and a fake ComfyUI returning solid PNGs
 cd frontend && npm install && npm run dev          # proxies /api and /v1 to :8000
 API_KEY=test poetry run pytest                     # unit + full-stack tests against the fake engine
 ```
@@ -110,7 +166,8 @@ then builds and pushes `ghcr.io/<owner>/model-pod:{latest,sha}`.
   has upstream MTP support, together with that image's own CUDA 13.3 cuBLAS
   and cudart in `/opt/llama.cpp/cuda`. They are only on llama-server's
   library path. Ollama comes from `ollama/ollama:0.35.0` with its bundled
-  libs. Pods need a CUDA 13 host driver, and `pod.sh` filters for one.
+  libs. ComfyUI `v0.37.0` is cloned to `/opt/ComfyUI` with a venv that reuses
+  vLLM's system torch; only ComfyUI's other dependencies go into the venv. Pods need a CUDA 13 host driver, and `pod.sh` filters for one.
 - The supervisor runs in its own venv so its dependencies never conflict with
   vLLM's.
 - Downloads use `huggingface_hub` (hf_xet) in a killable child process with

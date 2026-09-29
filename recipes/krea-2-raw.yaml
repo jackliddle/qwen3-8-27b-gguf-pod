@@ -1,0 +1,41 @@
+# Krea 2 Raw via ComfyUI (Comfy-Org fp8 repackage).
+# Licence: Krea 2 Community License (commercial use needs a separate licence from Krea).
+id: krea-2-raw
+name: Krea 2 Raw (fp8)
+description: Krea 2 Raw, the undistilled base (52 steps, CFG 3.5, real negative prompt). Slower; mainly for LoRA work, Turbo is better for inference.
+engine: comfyui
+served_name: krea-2-raw
+vram_gb: 20
+disk_gb: 19
+capabilities: [txt2img]
+source:
+  comfy_files:
+    - {repo: Comfy-Org/Krea-2, file: diffusion_models/krea2_raw_fp8_scaled.safetensors, dir: diffusion_models}
+    - {repo: Comfy-Org/Krea-2, file: text_encoders/qwen3vl_4b_fp8_scaled.safetensors, dir: text_encoders}
+    - {repo: Comfy-Org/Krea-2, file: vae/qwen_image_vae.safetensors, dir: vae}
+workflow: workflows/krea-2-raw.json
+inputs:
+  prompt: [{node: "6", input: text}]
+  negative_prompt: [{node: "7", input: text}]
+  width: [{node: "5", input: width}]
+  height: [{node: "5", input: height}]
+  batch_size: [{node: "5", input: batch_size}]
+  seed: [{node: "3", input: seed}]
+  steps: [{node: "3", input: steps}]
+  cfg: [{node: "3", input: cfg}]
+lora_insert: {model_node: "10"}
+# Style LoRAs (trained on Raw, work on both). Pick at deploy, apply per request
+# with loras: [{name: neondrip, strength: 0.8}]; the trigger is appended to the prompt.
+loras:
+  darkbrush: {repo: Comfy-Org/Krea-2, file: loras/krea2_darkbrush.safetensors, strength: 0.8, trigger: monochrome ink wash style}
+  dotmatrix: {repo: Comfy-Org/Krea-2, file: loras/krea2_dotmatrix.safetensors, strength: 0.8, trigger: Monochrome stippling style}
+  kidsdrawing: {repo: Comfy-Org/Krea-2, file: loras/krea2_kidsdrawing.safetensors, strength: 0.8, trigger: naive expressive sketch style}
+  neondrip: {repo: Comfy-Org/Krea-2, file: loras/krea2_neondrip.safetensors, strength: 0.8, trigger: Textured abstract style}
+  rainywindow: {repo: Comfy-Org/Krea-2, file: loras/krea2_rainywindow.safetensors, strength: 0.8, trigger: rainy window style}
+  retroanime: {repo: Comfy-Org/Krea-2, file: loras/krea2_retroanime.safetensors, strength: 0.8, trigger: Purple retro anime style}
+  softwatercolor: {repo: Comfy-Org/Krea-2, file: loras/krea2_softwatercolor.safetensors, strength: 0.8, trigger: Art Deco watercolor style}
+  sunsetblur: {repo: Comfy-Org/Krea-2, file: loras/krea2_sunsetblur.safetensors, strength: 0.8, trigger: ethereal motion blur style}
+  vintagetarot: {repo: Comfy-Org/Krea-2, file: loras/krea2_vintagetarot.safetensors, strength: 0.8, trigger: vintage tarot style}
+params:
+  loras: {type: multi, values: [darkbrush, dotmatrix, kidsdrawing, neondrip, rainywindow, retroanime, softwatercolor, sunsetblur, vintagetarot], default: [], description: Style LoRAs to download (~0.5GB each)}
+warmup: {width: 512, height: 512, steps: 2}

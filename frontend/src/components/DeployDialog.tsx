@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { ApiError, post, type Recipe } from '../api'
 
+const fmt = (v: unknown) => (v == null ? '' : Array.isArray(v) ? v.join(',') : String(v))
+
 export function DeployDialog({ recipe, onClose, onDeployed }: { recipe: Recipe; onClose: () => void; onDeployed: () => void }) {
   const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(Object.entries(recipe.params).map(([k, s]) => [k, s.default == null ? '' : String(s.default)])),
+    Object.fromEntries(Object.entries(recipe.params).map(([k, s]) => [k, fmt(s.default)])),
   )
   const [error, setError] = useState<string | null>(null)
   const [needsForce, setNeedsForce] = useState(false)
@@ -14,7 +16,7 @@ export function DeployDialog({ recipe, onClose, onDeployed }: { recipe: Recipe; 
     setError(null)
     // Only send changed values; the server fills in defaults.
     const params = Object.fromEntries(
-      Object.entries(values).filter(([k, v]) => v !== (recipe.params[k].default == null ? '' : String(recipe.params[k].default))),
+      Object.entries(values).filter(([k, v]) => v !== fmt(recipe.params[k].default)),
     )
     try {
       await post('/api/deployments', { recipe_id: recipe.id, params, force })
@@ -52,7 +54,28 @@ export function DeployDialog({ recipe, onClose, onDeployed }: { recipe: Recipe; 
                 {name}
                 {spec.flag && <code className="flag">{spec.flag}</code>}
               </span>
-              {spec.type === 'enum' ? (
+              {spec.type === 'multi' ? (
+                <div className="checks">
+                  {spec.values?.map((v) => {
+                    const on = values[name].split(',').filter(Boolean)
+                    return (
+                      <label key={v} className="check">
+                        <input
+                          type="checkbox"
+                          checked={on.includes(v)}
+                          onChange={(e) =>
+                            setValues({
+                              ...values,
+                              [name]: (e.target.checked ? [...on, v] : on.filter((x) => x !== v)).join(','),
+                            })
+                          }
+                        />
+                        {v}
+                      </label>
+                    )
+                  })}
+                </div>
+              ) : spec.type === 'enum' ? (
                 <select value={values[name]} onChange={(e) => setValues({ ...values, [name]: e.target.value })}>
                   {spec.values?.map((v) => (
                     <option key={v}>{v}</option>

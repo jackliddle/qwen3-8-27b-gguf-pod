@@ -1,0 +1,32 @@
+# Port of the qwen-image-2512-pod image (ComfyUI-native fp8 repackage + Lightning LoRA).
+id: qwen-image-2512
+name: Qwen-Image-2512 (fp8)
+description: Qwen's text-to-image model, strong at text rendering. `fast` switches to the 4-step Lightning LoRA (cfg 1) instead of 50 steps at cfg 4. Apache-2.0.
+engine: comfyui
+served_name: qwen-image-2512
+vram_gb: 30
+disk_gb: 32
+capabilities: [txt2img]
+source:
+  comfy_files:
+    - {repo: Comfy-Org/Qwen-Image_ComfyUI, file: split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors, dir: diffusion_models}
+    - {repo: Comfy-Org/Qwen-Image_ComfyUI, file: split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors, dir: text_encoders}
+    - {repo: Comfy-Org/Qwen-Image_ComfyUI, file: split_files/vae/qwen_image_vae.safetensors, dir: vae}
+    - {repo: lightx2v/Qwen-Image-2512-Lightning, file: Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors, dir: loras}
+workflow: workflows/qwen-image-2512.json
+inputs:
+  prompt: [{node: "238:227", input: text}]
+  negative_prompt: [{node: "238:228", input: text}]
+  width: [{node: "238:232", input: width}]
+  height: [{node: "238:232", input: height}]
+  batch_size: [{node: "238:232", input: batch_size}]
+  seed: [{node: "238:230", input: seed}]
+  # Steps/CFG exist once per branch of the Lightning switch; an explicit
+  # request value sets both so it applies whichever branch runs.
+  steps: [{node: "238:224", input: value}, {node: "238:225", input: value}]
+  cfg: [{node: "238:223", input: value}, {node: "238:218", input: value}]
+  fast: [{node: "238:229", input: value}]
+lora_insert: {model_node: "238:226"}
+params:
+  fast: {type: bool, default: false, description: "Default to the 4-step Lightning LoRA (overridable per request via params.fast)"}
+warmup: {width: 512, height: 512, steps: 2}

@@ -37,6 +37,9 @@ def server(tmp_path_factory):
         "RECIPES_DIR": str(REPO / "recipes"),
         "STATIC_DIR": str(tmp / "no-ui"),
         "ENGINE_BASE_PORT": str(_free_port()),
+        "COMFYUI_FAKE": "1",
+        "COMFYUI_PORT": str(comfy_port := _free_port()),
+        "COMFY_ROOT": str(tmp / "comfy"),
         "RUNPOD_POD_ID": "",
     }
     proc = subprocess.Popen(
@@ -54,7 +57,7 @@ def server(tmp_path_factory):
     else:
         proc.kill()
         raise RuntimeError("supervisor did not start")
-    yield {"base": base, "tmp": tmp}
+    yield {"base": base, "tmp": tmp, "comfy_port": comfy_port}
     proc.terminate()
     proc.wait(timeout=30)
 

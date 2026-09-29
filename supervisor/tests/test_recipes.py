@@ -28,7 +28,7 @@ def test_all_repo_recipes_valid():
     files = sorted((REPO / "recipes").glob("*.yaml"))
     assert files
     for f in files:
-        r = parse_recipe(f.read_text(), "builtin")
+        r = parse_recipe(f.read_text(), "builtin", base_dir=f.parent)
         assert r.id == f.stem, f"{f.name}: id should match filename"
 
 

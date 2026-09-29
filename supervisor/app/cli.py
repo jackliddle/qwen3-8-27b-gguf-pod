@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from .smoke import run_smoke
+from .smoke import run_image_smoke, run_smoke
 
 TERMINAL = {"ready", "failed", "stopped"}
 
@@ -186,10 +186,25 @@ OPENAI_BASE_URL={ep['base_url']}
 OPENAI_API_KEY={_key()}
 MODEL={ep['model']}
 
-curl {ep['base_url']}/chat/completions \\
+{_example(d)}"""
+    )
+
+
+def _example(d: dict) -> str:
+    ep = d["endpoint"]
+    if d.get("kind") != "image":
+        return f"""curl {ep['base_url']}/chat/completions \\
   -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \\
   -d '{{"model": "{ep['model']}", "messages": [{{"role": "user", "content": "Hello"}}]}}'"""
-    )
+    if "txt2img" in d["capabilities"]:
+        return f"""curl {ep['base_url']}/images/generations \\
+  -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \\
+  -d '{{"model": "{ep['model']}", "prompt": "a red fox in the snow", "size": "1024x1024", "response_format": "url"}}'
+
+# slow jobs (>~90s through the RunPod proxy): mp gen {ep['model']} "a red fox in the snow" -o fox.png"""
+    return f"""curl {ep['base_url']}/images/edits \\
+  -H "Authorization: Bearer $OPENAI_API_KEY" \\
+  -F model={ep['model']} -F image=@input.png -F prompt="make it night time" -F response_format=url"""
 
 
 def cmd_endpoints(c, a):
@@ -205,7 +220,12 @@ def cmd_test(c, a):
     if d["status"] != "ready":
         sys.exit(f"{a.id} is {d['status']}, not ready")
     caps = a.caps.split(",") if a.caps else d["capabilities"]
-    results = run_smoke(d["endpoint"]["base_url"] if a.public else f"{c.base_url}/v1", _key(), d["served_name"], caps, a.max_tokens)
+    base = d["endpoint"]["base_url"] if a.public else f"{c.base_url}/v1"
+    if d.get("kind") == "image":
+        loras = list(d["params"].get("loras") or [])
+        results = run_image_smoke(base, _key(), d["served_name"], caps, loras, a.save, a.size)
+    else:
+        results = run_smoke(base, _key(), d["served_name"], caps, a.max_tokens)
     if a.json:
         print(json.dumps([r.to_dict() for r in results], indent=2))
     else:
@@ -213,6 +233,35 @@ def cmd_test(c, a):
             print(f"{'PASS' if r.ok else 'FAIL'}  {r.name:<10} {r.seconds:6.2f}s  {r.detail}")
     if not all(r.ok for r in results):
         sys.exit(1)
+
+
+def cmd_gen(c, a):
+    """One image via the async job API (no proxy timeout), saved to --out."""
+    import base64
+
+    body = {"model": a.model, "prompt": a.prompt, "size": a.size, "n": a.n}
+    for key in ("negative_prompt", "seed", "steps", "cfg"):
+        if getattr(a, key) is not None:
+            body[key] = getattr(a, key)
+    if a.lora:
+        body["loras"] = [{"name": n, **({"strength": float(st)} if st else {})} for n, _, st in (x.partition(":") for x in a.lora)]
+    if a.set:
+        body["params"] = _parse_sets(a.set)
+    if a.image:
+        body["image_b64"] = base64.b64encode(Path(a.image).read_bytes()).decode()
+    t0 = time.monotonic()
+    job = _call(c, "POST", "/api/images/jobs", json=body)
+    while job["status"] not in ("done", "error"):
+        time.sleep(1)
+        job = _call(c, "GET", f"/api/images/jobs/{job['job_id']}")
+    if job["status"] == "error":
+        sys.exit(f"generation failed: {job['error']}")
+    out = Path(a.out)
+    for i, img in enumerate(job["images"]):
+        path = out if len(job["images"]) == 1 else out.with_name(f"{out.stem}-{i + 1}{out.suffix}")
+        path.write_bytes(httpx.get(img["url"], timeout=60).raise_for_status().content)
+        print(path)
+    print(f"seed {job['seed']}, {time.monotonic() - t0:.1f}s", file=sys.stderr)
 
 
 def main() -> None:
@@ -283,7 +332,24 @@ def main() -> None:
     s.add_argument("--max-tokens", type=int, default=512)
     s.add_argument("--public", action="store_true", help="go through the public proxy URL instead of MP_URL")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--save", metavar="DIR", help="image models: save generated images here")
+    s.add_argument("--size", type=int, default=512, help="image models: test image size")
     s.set_defaults(fn=cmd_test)
+
+    s = sub.add_parser("gen", help="generate an image (image models)")
+    s.add_argument("model", help="served_name of a ready image deployment")
+    s.add_argument("prompt")
+    s.add_argument("-o", "--out", default="out.png")
+    s.add_argument("--size", default="1024x1024")
+    s.add_argument("-n", type=int, default=1)
+    s.add_argument("--negative-prompt", dest="negative_prompt")
+    s.add_argument("--seed", type=int)
+    s.add_argument("--steps", type=int)
+    s.add_argument("--cfg", type=float)
+    s.add_argument("--lora", action="append", default=[], metavar="NAME[:STRENGTH]")
+    s.add_argument("--image", help="input image for edit models")
+    s.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="recipe param override, e.g. fast=true")
+    s.set_defaults(fn=cmd_gen)
 
     a = p.parse_args()
     with _client() as c:

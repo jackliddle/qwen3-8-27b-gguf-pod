@@ -116,33 +116,58 @@ def _expected_hf_size(repo: str, revision: str | None, patterns: list[str]) -> t
     return total, count
 
 
+@dataclass
+class HfFetch:
+    """One repo's worth of files for hf_download_many."""
+
+    repo: str
+    patterns: list[str]
+    revision: str | None = None
+    subdir: str = ""  # relative to ctx.model_dir
+
+
 async def hf_download(ctx: RunContext, repo: str, patterns: list[str], revision: str | None) -> None:
-    """Fetch (part of) an HF repo into ctx.model_dir, with retries and progress.
+    await hf_download_many(ctx, [HfFetch(repo, patterns, revision)])
+
+
+async def hf_download_many(ctx: RunContext, fetches: list[HfFetch]) -> None:
+    """Fetch (parts of) one or more HF repos under ctx.model_dir, with retries and progress.
 
     Runs snapshot_download in a child process so a Stop mid-download can kill
     it. snapshot_download stages into <dir>/.cache and only materialises each
     file once complete, so interrupted attempts never leave a corrupt file and
-    a retry resumes.
+    a retry resumes. Progress is the size of ctx.model_dir against the summed
+    size of everything requested.
     """
     ctx.model_dir.mkdir(parents=True, exist_ok=True)
-    total, count = await asyncio.to_thread(_expected_hf_size, repo, revision, patterns)
-    if count == 0:
-        raise RuntimeError(f"no files in {repo} match {patterns or '*'}")
+    total = 0
+    for f in fetches:
+        size, count = await asyncio.to_thread(_expected_hf_size, f.repo, f.revision, f.patterns)
+        if count == 0:
+            raise RuntimeError(f"no files in {f.repo} match {f.patterns or '*'}")
+        ctx.log(f"{f.repo}: {count} file(s), {size / 1e9:.2f}GB")
+        total += size
     free = shutil.disk_usage(ctx.model_dir).free
     if total > free:
         raise RuntimeError(f"need {total / 1e9:.1f}GB, only {free / 1e9:.1f}GB free on {ctx.model_dir}")
-    ctx.log(f"Downloading {count} file(s), {total / 1e9:.2f}GB from {repo}")
     ctx.set_progress(dir_size(ctx.model_dir), total)
+    for f in fetches:
+        await _fetch_one(ctx, f, total)
+    ctx.set_progress(total, total)
+    ctx.log("Download complete")
 
-    cmd = [sys.executable, "-m", "app.hf_fetch", "--repo", repo, "--dir", str(ctx.model_dir)]
-    if revision:
-        cmd += ["--revision", revision]
-    for p in patterns:
+
+async def _fetch_one(ctx: RunContext, f: HfFetch, total: int) -> None:
+    dest = ctx.model_dir / f.subdir if f.subdir else ctx.model_dir
+    cmd = [sys.executable, "-m", "app.hf_fetch", "--repo", f.repo, "--dir", str(dest)]
+    if f.revision:
+        cmd += ["--revision", f.revision]
+    for p in f.patterns:
         cmd += ["--pattern", p]
 
     max_attempts = 10
     for attempt in range(1, max_attempts + 1):
-        ctx.log(f"Download attempt {attempt}/{max_attempts}")
+        ctx.log(f"Download attempt {attempt}/{max_attempts}: {f.repo}")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -164,12 +189,10 @@ async def hf_download(ctx: RunContext, repo: str, patterns: list[str], revision:
         finally:
             await pump
         if proc.returncode == 0:
-            ctx.set_progress(total, total)
-            ctx.log("Download complete")
             return
         ctx.log(f"Attempt {attempt} failed (exit {proc.returncode})")
         await asyncio.sleep(5)
-    raise RuntimeError(f"download failed after {max_attempts} attempts")
+    raise RuntimeError(f"download of {f.repo} failed after {max_attempts} attempts")
 
 
 async def _pump(proc: asyncio.subprocess.Process, ctx: RunContext) -> None:

@@ -1,0 +1,275 @@
+{
+  "41": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    }
+  },
+  "160": {
+    "class_type": "FluxKontextImageScale",
+    "inputs": {
+      "image": [
+        "41",
+        0
+      ]
+    }
+  },
+  "161": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_edit_2511_fp8mixed.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "162": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "146": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    }
+  },
+  "145": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "shift": 3.1,
+      "model": [
+        "161",
+        0
+      ]
+    }
+  },
+  "152": {
+    "class_type": "CFGNorm",
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "145",
+        0
+      ]
+    }
+  },
+  "153": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "152",
+        0
+      ]
+    }
+  },
+  "168": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": false
+    }
+  },
+  "163": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "168",
+        0
+      ],
+      "on_false": [
+        "152",
+        0
+      ],
+      "on_true": [
+        "153",
+        0
+      ]
+    }
+  },
+  "165": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 4
+    }
+  },
+  "166": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 40
+    }
+  },
+  "167": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "168",
+        0
+      ],
+      "on_false": [
+        "166",
+        0
+      ],
+      "on_true": [
+        "165",
+        0
+      ]
+    }
+  },
+  "154": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 4
+    }
+  },
+  "155": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 1
+    }
+  },
+  "164": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "168",
+        0
+      ],
+      "on_false": [
+        "154",
+        0
+      ],
+      "on_true": [
+        "155",
+        0
+      ]
+    }
+  },
+  "149": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "162",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ],
+      "image1": [
+        "160",
+        0
+      ]
+    }
+  },
+  "151": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "prompt": "make it blue",
+      "clip": [
+        "162",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ],
+      "image1": [
+        "160",
+        0
+      ]
+    }
+  },
+  "147": {
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "149",
+        0
+      ]
+    }
+  },
+  "148": {
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "151",
+        0
+      ]
+    }
+  },
+  "156": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "160",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ]
+    }
+  },
+  "169": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": [
+        "167",
+        0
+      ],
+      "cfg": [
+        "164",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "163",
+        0
+      ],
+      "positive": [
+        "148",
+        0
+      ],
+      "negative": [
+        "147",
+        0
+      ],
+      "latent_image": [
+        "156",
+        0
+      ]
+    }
+  },
+  "158": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "169",
+        0
+      ],
+      "vae": [
+        "146",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "qwen_edit",
+      "images": [
+        "158",
+        0
+      ]
+    }
+  }
+}

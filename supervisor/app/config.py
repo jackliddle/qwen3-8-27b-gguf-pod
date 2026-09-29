@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     ollama_bin: str = "ollama"
     ollama_port: int = 11434
 
+    # ComfyUI (image models): install location, the venv python that runs it,
+    # and its working tree (linked model files, inputs, outputs).
+    comfyui_dir: Path = Path("/opt/ComfyUI")
+    comfyui_python: str = "/opt/comfy-venv/bin/python"
+    comfyui_port: int = 8188
+    comfy_root: Path = Path("/workspace/comfy")
+    # Dev/tests: run app.fake_comfy instead of ComfyUI and skip real downloads.
+    comfyui_fake: bool = False
+
     # First port handed to per-model engine processes (bound to 127.0.0.1).
     engine_base_port: int = 9001
 

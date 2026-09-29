@@ -156,7 +156,10 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               <article className="card recipe" key={r.id}>
                 <header>
                   <h3>{r.name}</h3>
-                  <span className={`chip engine-${r.engine}`}>{r.engine}</span>
+                  <span className="chips">
+                    {r.kind === 'image' && <span className="chip kind-image">image</span>}
+                    <span className={`chip engine-${r.engine}`}>{r.engine}</span>
+                  </span>
                 </header>
                 {r.description && <p className="muted desc">{r.description}</p>}
                 <div className="facts">

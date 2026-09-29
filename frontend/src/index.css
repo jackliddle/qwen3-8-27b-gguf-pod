@@ -642,3 +642,33 @@ textarea {
     width: 120px;
   }
 }
+
+/* --- image models --- */
+.chips {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.kind-image {
+  color: #a371f7;
+  border-color: currentColor;
+}
+.engine-comfyui {
+  color: #db61a2;
+  border-color: currentColor;
+}
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 12.5px var(--mono);
+  cursor: pointer;
+}
+.check input {
+  width: auto;
+}

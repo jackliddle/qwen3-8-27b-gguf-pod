@@ -9,6 +9,8 @@
 ARG VLLM_TAG=v0.30.0-ubuntu2404
 ARG LLAMACPP_TAG=server-cuda13-b10524
 ARG OLLAMA_TAG=0.35.0
+# First release with Krea-2 support is ~v0.33; pinned for reproducible workflows.
+ARG COMFYUI_TAG=v0.37.0
 
 FROM ghcr.io/ggml-org/llama.cpp:${LLAMACPP_TAG} AS llamacpp
 RUN mkdir -p /out/cuda && \
@@ -27,7 +29,7 @@ RUN npm run build
 FROM vllm/vllm-openai:${VLLM_TAG}
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libgomp1 libcurl4 libssl3 openssh-server curl ca-certificates && \
+    apt-get install -y --no-install-recommends libgomp1 libcurl4 libssl3 openssh-server curl ca-certificates git && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /run/sshd
 
@@ -43,6 +45,18 @@ RUN mkdir -p /opt/llama.cpp/bin && \
 # Ollama
 COPY --from=ollama /usr/bin/ollama /usr/bin/ollama
 COPY --from=ollama /usr/lib/ollama /usr/lib/ollama
+
+# ComfyUI (image models), headless. Its venv sees the system site-packages so
+# it reuses vLLM's torch/CUDA stack (no second ~5GB torch); everything else it
+# needs is installed into the venv only, leaving vLLM's environment untouched.
+ARG COMFYUI_TAG
+RUN git clone --depth 1 --branch ${COMFYUI_TAG} https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI && \
+    env -u UV_OVERRIDE uv venv --seed --system-site-packages --python "$(command -v python3)" /opt/comfy-venv && \
+    grep -viE '^(torch|torchvision|torchaudio)([<>=~ ]|$)' /opt/ComfyUI/requirements.txt > /tmp/comfy-reqs.txt && \
+    /opt/comfy-venv/bin/python -m pip install --no-cache-dir -r /tmp/comfy-reqs.txt && \
+    /opt/comfy-venv/bin/python -c "import torch; assert '/opt/comfy-venv' not in torch.__file__, torch.__file__; print('comfy torch', torch.__version__, torch.__file__)" && \
+    /opt/comfy-venv/bin/python -c "import einops, transformers, safetensors, aiohttp, av, spandrel, kornia, comfy_kitchen, comfy_aimdo" && \
+    rm /tmp/comfy-reqs.txt
 
 # Supervisor in its own venv so its deps never collide with vLLM's.
 WORKDIR /opt/model-pod

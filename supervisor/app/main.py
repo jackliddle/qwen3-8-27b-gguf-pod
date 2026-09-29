@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from . import gateway
+from . import gateway, images
 from .auth import require_key
 from .config import Settings, get_settings
 from .deployments import ACTIVE, DeployError, DeploymentManager
@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI):
     s.models_dir.mkdir(parents=True, exist_ok=True)
     app.state.recipes = RecipeStore(s.recipes_dir, s.local_recipes_dir, DEV_RECIPES if s.mp_dev else None)
     app.state.manager = DeploymentManager(s)
+    app.state.jobs = images.JobStore()
     app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(10, read=None, write=120, pool=None))
     # Don't block startup on GitHub; baked-in recipes are usable immediately.
     refresh = asyncio.create_task(app.state.recipes.refresh_remote(s.recipes_repo, s.recipes_ref, s.github_token))
@@ -41,6 +42,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="model-pod supervisor", lifespan=lifespan)
+# Image routes first: the gateway's /v1/{path} catch-all would shadow them.
+app.include_router(images.v1)
+app.include_router(images.api)
 app.include_router(gateway.router)
 api = APIRouter(prefix="/api")
 
@@ -83,7 +87,7 @@ async def status(request: Request) -> dict:
 
 def _recipe_dict(r, manager: DeploymentManager) -> dict:
     d = manager.deployments.get(r.id)
-    return {**r.model_dump(), "deployment_status": d.status if d else None}
+    return {**r.model_dump(exclude={"workflow"}), "kind": r.kind, "deployment_status": d.status if d else None}
 
 
 @authed.get("/recipes")

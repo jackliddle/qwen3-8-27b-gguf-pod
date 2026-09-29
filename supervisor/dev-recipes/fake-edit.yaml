@@ -1,0 +1,27 @@
+# Dev-only: img2img against app.fake_comfy (returns a blue image the size of the input).
+id: fake-edit
+name: Fake image edit (dev)
+description: Returns a solid blue PNG the size of the input image.
+engine: comfyui
+served_name: fake-edit
+vram_gb: 0
+capabilities: [img2img]
+start_timeout: 30
+source:
+  comfy_files:
+    - {repo: fake/qwen-edit, file: split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors, dir: diffusion_models}
+    - {repo: fake/qwen, file: split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors, dir: text_encoders}
+    - {repo: fake/qwen, file: split_files/vae/qwen_image_vae.safetensors, dir: vae}
+    - {repo: fake/lightning, file: Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors, dir: loras}
+workflow: {"41": {"class_type": "LoadImage", "inputs": {"image": "example.png"}}, "160": {"class_type": "FluxKontextImageScale", "inputs": {"image": ["41", 0]}}, "161": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_edit_2511_fp8mixed.safetensors", "weight_dtype": "default"}}, "162": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default"}}, "146": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}}, "145": {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.1, "model": ["161", 0]}}, "152": {"class_type": "CFGNorm", "inputs": {"strength": 1, "model": ["145", 0]}}, "153": {"class_type": "LoraLoaderModelOnly", "inputs": {"lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors", "strength_model": 1, "model": ["152", 0]}}, "168": {"class_type": "PrimitiveBoolean", "inputs": {"value": false}}, "163": {"class_type": "ComfySwitchNode", "inputs": {"switch": ["168", 0], "on_false": ["152", 0], "on_true": ["153", 0]}}, "165": {"class_type": "PrimitiveInt", "inputs": {"value": 4}}, "166": {"class_type": "PrimitiveInt", "inputs": {"value": 40}}, "167": {"class_type": "ComfySwitchNode", "inputs": {"switch": ["168", 0], "on_false": ["166", 0], "on_true": ["165", 0]}}, "154": {"class_type": "PrimitiveFloat", "inputs": {"value": 4}}, "155": {"class_type": "PrimitiveFloat", "inputs": {"value": 1}}, "164": {"class_type": "ComfySwitchNode", "inputs": {"switch": ["168", 0], "on_false": ["154", 0], "on_true": ["155", 0]}}, "149": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"prompt": "", "clip": ["162", 0], "vae": ["146", 0], "image1": ["160", 0]}}, "151": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"prompt": "make it blue", "clip": ["162", 0], "vae": ["146", 0], "image1": ["160", 0]}}, "147": {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"reference_latents_method": "index_timestep_zero", "conditioning": ["149", 0]}}, "148": {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"reference_latents_method": "index_timestep_zero", "conditioning": ["151", 0]}}, "156": {"class_type": "VAEEncode", "inputs": {"pixels": ["160", 0], "vae": ["146", 0]}}, "169": {"class_type": "KSampler", "inputs": {"seed": 0, "steps": ["167", 0], "cfg": ["164", 0], "sampler_name": "euler", "scheduler": "simple", "denoise": 1, "model": ["163", 0], "positive": ["148", 0], "negative": ["147", 0], "latent_image": ["156", 0]}}, "158": {"class_type": "VAEDecode", "inputs": {"samples": ["169", 0], "vae": ["146", 0]}}, "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "qwen_edit", "images": ["158", 0]}}}
+inputs:
+  image: [{node: "41", input: image}]
+  prompt: [{node: "151", input: prompt}]
+  negative_prompt: [{node: "149", input: prompt}]
+  seed: [{node: "169", input: seed}]
+  steps: [{node: "165", input: value}, {node: "166", input: value}]
+  fast: [{node: "168", input: value}]
+lora_insert: {model_node: "161"}
+params:
+  fast: {type: bool, default: true}
+warmup: {width: 256, height: 192}

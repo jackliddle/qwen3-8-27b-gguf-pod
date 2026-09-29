@@ -1,11 +1,12 @@
 from .base import Cancelled, Engine, RunContext, Upstream
+from .comfyui import ComfyUIEngine
 from .fake import FakeEngine
 from .llamacpp import LlamaCppEngine
 from .ollama import OllamaEngine
 from .vllm import VllmEngine
 
 _ENGINES: dict[str, Engine] = {
-    e.name: e for e in (LlamaCppEngine(), VllmEngine(), OllamaEngine(), FakeEngine())
+    e.name: e for e in (LlamaCppEngine(), VllmEngine(), OllamaEngine(), ComfyUIEngine(), FakeEngine())
 }
 
 

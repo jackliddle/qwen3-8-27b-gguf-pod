@@ -158,3 +158,92 @@ def run_smoke(base_url: str, api_key: str, model: str, capabilities: list[str], 
         check("reasoning", t_reasoning)
     client.close()
     return results
+
+
+def run_image_smoke(
+    base_url: str,
+    api_key: str,
+    model: str,
+    capabilities: list[str],
+    loras: list[str],
+    save_dir: str | None = None,
+    size: int = 512,
+) -> list[Result]:
+    """Image checks: OpenAI endpoint, async job API, a LoRA, and edits — as the recipe supports."""
+    from pathlib import Path
+
+    from .pngutil import png_size, solid_png
+
+    base_url = base_url.rstrip("/")
+    root = base_url.removesuffix("/v1")
+    client = httpx.Client(headers={"Authorization": f"Bearer {api_key}"}, timeout=900)
+    results: list[Result] = []
+    out = Path(save_dir) if save_dir else None
+    if out:
+        out.mkdir(parents=True, exist_ok=True)
+
+    def check(name: str, fn) -> None:
+        t0 = time.monotonic()
+        try:
+            detail = fn()
+            results.append(Result(name, True, detail, time.monotonic() - t0))
+        except Exception as e:
+            results.append(Result(name, False, f"{type(e).__name__}: {e}", time.monotonic() - t0))
+
+    def keep(name: str, png: bytes, want: tuple[int, int] | None) -> str:
+        got = png_size(png)
+        if want:
+            assert got == want, f"got {got[0]}x{got[1]}, wanted {want[0]}x{want[1]}"
+        path = ""
+        if out:
+            (out / f"{model}-{name}.png").write_bytes(png)
+            path = f" → {out / f'{model}-{name}.png'}"
+        return f"{got[0]}x{got[1]} PNG{path}"
+
+    def openai(name: str, path: str, **kw) -> bytes:
+        r = client.post(base_url + path, **kw)
+        if r.status_code != 200:
+            raise AssertionError(f"HTTP {r.status_code}: {r.text[:300]}")
+        return base64.b64decode(r.json()["data"][0]["b64_json"])
+
+    def job(body: dict) -> bytes:
+        r = client.post(root + "/api/images/jobs", json=body)
+        if r.status_code != 200:
+            raise AssertionError(f"HTTP {r.status_code}: {r.text[:300]}")
+        job_id = r.json()["job_id"]
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            j = client.get(f"{root}/api/images/jobs/{job_id}").json()
+            if j["status"] == "done":
+                return client.get(j["images"][0]["url"]).raise_for_status().content
+            if j["status"] == "error":
+                raise AssertionError(j["error"])
+            time.sleep(1)
+        raise AssertionError("job not done after 900s")
+
+    prompt = "a red fox sitting in fresh snow, golden hour, detailed photo"
+    sz = f"{size}x{size}"
+    if "txt2img" in capabilities:
+        check("generate", lambda: keep("generate", openai("generate", "/images/generations", json={"model": model, "prompt": prompt, "size": sz}), (size, size)))
+        check("job", lambda: keep("job", job({"model": model, "prompt": "a lighthouse on a cliff at night, stormy sea", "size": sz}), (size, size)))
+        if loras:
+            check(
+                f"lora:{loras[0]}",
+                lambda: keep("lora", openai("lora", "/images/generations", json={"model": model, "prompt": prompt, "size": sz, "loras": [{"name": loras[0]}]}), (size, size)),
+            )
+    if "img2img" in capabilities:
+        src = solid_png(size, size, (200, 30, 30))
+        check(
+            "edit",
+            lambda: keep(
+                "edit",
+                openai("edit", "/images/edits", files={"image": ("in.png", src, "image/png")}, data={"model": model, "prompt": "make the whole image deep blue"}),
+                None,
+            ),
+        )
+        check(
+            "edit-job",
+            lambda: keep("edit-job", job({"model": model, "prompt": "add a white star in the centre", "image_b64": base64.b64encode(src).decode()}), None),
+        )
+    client.close()
+    return results

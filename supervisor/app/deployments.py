@@ -137,6 +137,7 @@ class Deployment:
             "recipe_id": self.recipe.id,
             "name": self.recipe.name,
             "engine": self.recipe.engine,
+            "kind": self.recipe.kind,
             "served_name": self.recipe.served_name,
             "capabilities": self.recipe.capabilities,
             "params": self.params,
@@ -243,8 +244,7 @@ class DeploymentManager:
     async def shutdown(self) -> None:
         # Pod is going away; kill engines but don't bother deleting files.
         await asyncio.gather(*(d.stop(delete_files=False) for d in self.active()), return_exceptions=True)
-        from .engines.ollama import OllamaEngine
-
-        ollama = get_engine("ollama")
-        if isinstance(ollama, OllamaEngine):
-            await ollama.shutdown()
+        for name in ("ollama", "comfyui"):
+            shutdown = getattr(get_engine(name), "shutdown", None)
+            if shutdown:
+                await shutdown()

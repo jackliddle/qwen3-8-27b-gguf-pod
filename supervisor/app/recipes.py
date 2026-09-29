@@ -1,6 +1,7 @@
 """Recipe = one deployable model. YAML files under recipes/ are the "plugins"."""
 
 import io
+import json
 import logging
 import tarfile
 from pathlib import Path
@@ -12,14 +13,15 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 log = logging.getLogger(__name__)
 
-EngineName = Literal["llamacpp", "vllm", "ollama", "fake"]
-Capability = Literal["chat", "vision", "reasoning", "tools", "embeddings"]
+EngineName = Literal["llamacpp", "vllm", "ollama", "comfyui", "fake"]
+Capability = Literal["chat", "vision", "reasoning", "tools", "embeddings", "txt2img", "img2img"]
+IMAGE_ENGINES = {"comfyui"}
 
 
 class ParamSpec(BaseModel):
-    type: Literal["int", "float", "str", "bool", "enum"]
+    type: Literal["int", "float", "str", "bool", "enum", "multi"]
     default: Any = None
-    values: list[str] | None = None  # for enum
+    values: list[str] | None = None  # for enum / multi
     description: str | None = None
     # CLI flag this maps to. Optional when the engine knows the param name
     # (e.g. ctx_size); engines that don't use flags (ollama) ignore it.
@@ -27,8 +29,8 @@ class ParamSpec(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> "ParamSpec":
-        if self.type == "enum" and not self.values:
-            raise ValueError("enum params need 'values'")
+        if self.type in ("enum", "multi") and not self.values:
+            raise ValueError(f"{self.type} params need 'values'")
         if self.default is not None:
             self.default = self.coerce(self.default)
         return self
@@ -55,6 +57,12 @@ class ParamSpec(BaseModel):
                 if value not in (self.values or []):
                     raise ValueError(f"{value!r} not in {self.values}")
                 return value
+            case "multi":
+                items = [v.strip() for v in value.split(",") if v.strip()] if isinstance(value, str) else list(value)
+                bad = [v for v in items if v not in (self.values or [])]
+                if bad:
+                    raise ValueError(f"{bad} not in {self.values}")
+                return items
             case _:
                 return str(value)
 
@@ -70,6 +78,34 @@ class Source(BaseModel):
     mmproj: str | None = None
     # ollama: library tag ("llama3.2:1b") or "hf.co/<repo>:<quant>".
     ollama_model: str | None = None
+    # comfyui: individual files, each linked into ComfyUI's models/<dir>/.
+    comfy_files: list["ComfyFile"] = Field(default_factory=list)
+
+
+class ComfyFile(BaseModel):
+    repo: str
+    file: str  # path inside the repo
+    dir: str  # ComfyUI model folder: diffusion_models, text_encoders, vae, loras, ...
+    revision: str | None = None
+
+
+class LoraSpec(BaseModel):
+    repo: str
+    file: str
+    strength: float = 1.0
+    # Appended to the prompt when the LoRA is applied (style LoRAs need it).
+    trigger: str | None = None
+    revision: str | None = None
+
+
+class InputTarget(BaseModel):
+    node: str
+    input: str
+
+
+class LoraInsert(BaseModel):
+    model_node: str  # node whose MODEL output (slot 0) gets the LoRA chain
+    clip_node: str | None = None  # if set, LoRAs also patch this CLIP (slot 0)
 
 
 class Recipe(BaseModel):
@@ -87,7 +123,19 @@ class Recipe(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     # Seconds to wait for the engine to report healthy after launch.
     start_timeout: int = 1800
+    # comfyui only: API-format workflow (inline, or a path relative to the
+    # recipe file, resolved at load time), how request fields map onto it,
+    # optional LoRA catalog, and warm-up overrides run before "ready".
+    workflow: dict[str, Any] | str | None = None
+    inputs: dict[str, list[InputTarget]] = Field(default_factory=dict)
+    loras: dict[str, LoraSpec] = Field(default_factory=dict)
+    lora_insert: LoraInsert | None = None
+    warmup: dict[str, Any] = Field(default_factory=dict)
     origin: str = "builtin"  # builtin | remote | local | dev (set by loader)
+
+    @property
+    def kind(self) -> str:
+        return "image" if self.engine in IMAGE_ENGINES else "llm"
 
     def resolve_params(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         overrides = overrides or {}
@@ -103,11 +151,21 @@ class Recipe(BaseModel):
         return out
 
 
-def parse_recipe(text: str, origin: str) -> Recipe:
+def parse_recipe(text: str, origin: str, base_dir: Path | None = None, files: dict[str, str] | None = None) -> Recipe:
+    """Parse + validate a recipe. A string `workflow:` is resolved against
+    `files` (remote tarball contents) or `base_dir` (the recipe's directory)."""
     data = yaml.safe_load(text)
     if not isinstance(data, dict):
         raise ValueError("recipe must be a YAML mapping")
     data["origin"] = origin
+    wf = data.get("workflow")
+    if isinstance(wf, str):
+        if files is not None and wf in files:
+            data["workflow"] = json.loads(files[wf])
+        elif base_dir is not None and (base_dir / wf).is_file():
+            data["workflow"] = json.loads((base_dir / wf).read_text())
+        else:
+            raise ValueError(f"workflow file not found: {wf}")
     recipe = Recipe.model_validate(data)
     from .engines import get_engine  # local import: engines import this module
 
@@ -115,13 +173,13 @@ def parse_recipe(text: str, origin: str) -> Recipe:
     return recipe
 
 
-def _load_dir(path: Path, origin: str) -> dict[str, Recipe]:
+def _load_dir(path: Path, origin: str, base_dir: Path | None = None) -> dict[str, Recipe]:
     out: dict[str, Recipe] = {}
     if not path.is_dir():
         return out
     for f in sorted(path.glob("*.y*ml")):
         try:
-            r = parse_recipe(f.read_text(), origin)
+            r = parse_recipe(f.read_text(), origin, base_dir=base_dir or path)
         except (ValidationError, ValueError, yaml.YAMLError) as e:
             log.warning("skipping invalid recipe %s: %s", f, e)
             continue
@@ -138,21 +196,26 @@ async def fetch_remote_recipes(repo: str, ref: str, token: str | None) -> dict[s
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
         resp = await c.get(url, headers=headers)
         resp.raise_for_status()
-    out: dict[str, Recipe] = {}
+    # <owner>-<repo>-<sha>/recipes/<path>: collect everything under recipes/
+    # first so recipes can reference workflows/*.json from the same tarball.
+    files: dict[str, str] = {}
     with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:gz") as tar:
         for m in tar.getmembers():
             parts = m.name.split("/")
-            # <owner>-<repo>-<sha>/recipes/<file>.yaml
-            if len(parts) == 3 and parts[1] == "recipes" and parts[2].endswith((".yaml", ".yml")):
+            if len(parts) >= 3 and parts[1] == "recipes" and m.isfile():
                 fh = tar.extractfile(m)
-                if fh is None:
-                    continue
-                try:
-                    r = parse_recipe(fh.read().decode(), "remote")
-                except (ValidationError, ValueError, yaml.YAMLError) as e:
-                    log.warning("skipping invalid remote recipe %s: %s", m.name, e)
-                    continue
-                out[r.id] = r
+                if fh is not None:
+                    files["/".join(parts[2:])] = fh.read().decode()
+    out: dict[str, Recipe] = {}
+    for name, text in files.items():
+        if "/" in name or not name.endswith((".yaml", ".yml")):
+            continue
+        try:
+            r = parse_recipe(text, "remote", files=files)
+        except (ValidationError, ValueError, yaml.YAMLError) as e:
+            log.warning("skipping invalid remote recipe %s: %s", name, e)
+            continue
+        out[r.id] = r
     return out
 
 
@@ -173,7 +236,8 @@ class RecipeStore:
             merged.update(_load_dir(self.dev_dir, "dev"))
         merged.update(_load_dir(self.builtin_dir, "builtin"))
         merged.update(self._remote)
-        merged.update(_load_dir(self.local_dir, "local"))
+        # Pushed recipes may reference the image's built-in workflows/ files.
+        merged.update(_load_dir(self.local_dir, "local", base_dir=self.builtin_dir))
         self.recipes = merged
 
     async def refresh_remote(self, repo: str | None, ref: str, token: str | None) -> None:
@@ -193,7 +257,7 @@ class RecipeStore:
             raise KeyError(f"no such recipe: {recipe_id}") from None
 
     def save_local(self, text: str) -> Recipe:
-        recipe = parse_recipe(text, "local")
+        recipe = parse_recipe(text, "local", base_dir=self.builtin_dir)
         self.local_dir.mkdir(parents=True, exist_ok=True)
         (self.local_dir / f"{recipe.id}.yaml").write_text(text)
         self.reload()

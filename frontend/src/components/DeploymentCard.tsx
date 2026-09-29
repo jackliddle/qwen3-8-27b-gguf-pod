@@ -36,6 +36,7 @@ export function DeploymentCard({ dep, onChange, onError }: { dep: Deployment; on
         <div>
           <h3>{dep.name}</h3>
           <div className="meta">
+            {dep.kind === 'image' && <span className="chip kind-image">image</span>}
             <span className="chip">{dep.engine}</span>
             <code>{dep.served_name}</code>
             <span className="muted">

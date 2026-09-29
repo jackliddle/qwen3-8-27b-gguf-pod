@@ -35,6 +35,7 @@ async def list_models(request: Request) -> dict:
                 "created": int(d.ready_at or d.created_at),
                 "owned_by": d.recipe.engine,
                 "recipe_id": d.recipe.id,
+                "type": d.recipe.kind,
             }
             for d in manager.deployments.values()
             if d.status == "ready"
@@ -69,6 +70,9 @@ async def proxy(path: str, request: Request):
         else:
             msg = f"model {model!r} is not deployed/ready; ready models: {ready}"
         return _error(404, msg, "model_not_found")
+
+    if dep.recipe.kind == "image":
+        return _error(400, f"{dep.recipe.served_name} is an image model; use /v1/images/generations", "wrong_endpoint")
 
     if payload is not None and payload.get("model") != dep.upstream.model:
         payload["model"] = dep.upstream.model

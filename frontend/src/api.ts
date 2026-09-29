@@ -1,5 +1,5 @@
 export type ParamSpec = {
-  type: 'int' | 'float' | 'str' | 'bool' | 'enum'
+  type: 'int' | 'float' | 'str' | 'bool' | 'enum' | 'multi'
   default: unknown
   values?: string[] | null
   description?: string | null
@@ -11,6 +11,7 @@ export type Recipe = {
   name: string
   description?: string | null
   engine: string
+  kind: 'llm' | 'image'
   source: Record<string, unknown>
   served_name: string
   vram_gb: number
@@ -27,6 +28,7 @@ export type Deployment = {
   recipe_id: string
   name: string
   engine: string
+  kind: 'llm' | 'image'
   served_name: string
   capabilities: string[]
   params: Record<string, unknown>

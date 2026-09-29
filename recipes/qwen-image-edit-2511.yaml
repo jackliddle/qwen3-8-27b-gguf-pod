@@ -1,0 +1,27 @@
+id: qwen-image-edit-2511
+name: Qwen-Image-Edit-2511 (fp8)
+description: Instruction-based image editing ("make the sofa fur", "change the sky to sunset"). One input image. `fast` uses the 4-step Lightning LoRA instead of 40 steps. Apache-2.0.
+engine: comfyui
+served_name: qwen-image-edit-2511
+vram_gb: 30
+disk_gb: 31
+capabilities: [img2img]
+source:
+  comfy_files:
+    - {repo: Comfy-Org/Qwen-Image-Edit_ComfyUI, file: split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors, dir: diffusion_models}
+    - {repo: Comfy-Org/Qwen-Image_ComfyUI, file: split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors, dir: text_encoders}
+    - {repo: Comfy-Org/Qwen-Image_ComfyUI, file: split_files/vae/qwen_image_vae.safetensors, dir: vae}
+    - {repo: lightx2v/Qwen-Image-Edit-2511-Lightning, file: Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors, dir: loras}
+workflow: workflows/qwen-image-edit-2511.json
+inputs:
+  image: [{node: "41", input: image}]
+  prompt: [{node: "151", input: prompt}]
+  negative_prompt: [{node: "149", input: prompt}]
+  seed: [{node: "169", input: seed}]
+  steps: [{node: "165", input: value}, {node: "166", input: value}]
+  cfg: [{node: "154", input: value}, {node: "155", input: value}]
+  fast: [{node: "168", input: value}]
+lora_insert: {model_node: "161"}
+params:
+  fast: {type: bool, default: false, description: "Default to the 4-step Lightning LoRA (overridable per request via params.fast)"}
+warmup: {width: 512, height: 512, steps: 2}
