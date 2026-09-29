@@ -106,8 +106,14 @@ class OllamaEngine(Engine):
             )
             if resp.status_code != 200:
                 raise RuntimeError(f"ollama create failed: {resp.text}")
-            ctx.log("Loading model into VRAM")
-            resp = await c.post(self._base(ctx) + "/api/generate", json={"model": r.served_name, "keep_alive": -1})
+            # Generate one token rather than an empty load: the first real
+            # inference pays a one-off CUDA warm-up (~15s), which should land
+            # here, not on the first client request.
+            ctx.log("Loading model into VRAM + warm-up")
+            resp = await c.post(
+                self._base(ctx) + "/api/generate",
+                json={"model": r.served_name, "prompt": "hi", "keep_alive": -1, "stream": False, "options": {"num_predict": 1}},
+            )
             if resp.status_code != 200:
                 raise RuntimeError(f"ollama load failed: {resp.text}")
         return Upstream(base_url=self._base(ctx), model=r.served_name)

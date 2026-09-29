@@ -63,6 +63,7 @@ ENV MODELS_DIR=/workspace/models \
     LLAMA_SERVER_BIN=/opt/llama.cpp/bin/llama-server \
     HF_HOME=/workspace/.hf \
     HF_XET_HIGH_PERFORMANCE=1 \
+    HF_XET_CHUNK_CACHE_SIZE_BYTES=0 \
     MP_URL=http://localhost:8000
 
 EXPOSE 8000 22
