@@ -1,0 +1,13 @@
+# Small Ollama smoke-test model.
+id: llama3.2-1b-ollama
+name: Llama 3.2 1B (Ollama, test)
+description: Tiny model for testing the Ollama engine end to end.
+engine: ollama
+source:
+  ollama_model: llama3.2:1b
+served_name: llama3.2-1b
+vram_gb: 3
+disk_gb: 1.3
+capabilities: [chat, tools]
+params:
+  num_ctx: {type: int, default: 8192, description: Context window (tokens)}

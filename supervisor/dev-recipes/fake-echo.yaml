@@ -1,0 +1,13 @@
+# Dev-only (MP_DEV=1): exercises the whole stack without a GPU.
+id: fake-echo
+name: Fake echo model (dev)
+description: Echoes the last user message. Simulated download, no GPU.
+engine: fake
+source: {}
+served_name: fake-echo
+vram_gb: 0
+capabilities: [chat, vision, tools, reasoning]
+start_timeout: 30
+params:
+  fake_download_mb: {type: int, default: 500, description: Simulated download size}
+  fail_start: {type: bool, default: false, description: Make the engine exit on startup}

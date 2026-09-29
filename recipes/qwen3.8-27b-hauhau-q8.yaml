@@ -1,0 +1,35 @@
+# Port of the original hardcoded entrypoint.sh (image ghcr.io/jackliddle/qwen3-8-27b-gguf-pod).
+# Only the Q8_K_P quant + BF16 vision projector are fetched, not the whole
+# 172GB repo. The FastMTP sidecar is deliberately not used (needs a patched
+# llama.cpp); this uses only the model's embedded MTP layers.
+id: qwen3.8-27b-hauhau-q8
+name: Qwen3.8 27B Uncensored Aggressive (Q8_K_P, MTP)
+description: HauhauCS uncensored fine-tune, GGUF Q8_K_P with vision projector, MTP speculative decoding.
+engine: llamacpp
+source:
+  hf_repo: HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF
+  files: [Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf]
+  mmproj: mmproj-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf
+served_name: qwen3.8-27b
+vram_gb: 38
+disk_gb: 33
+capabilities: [chat, vision, reasoning]
+params:
+  ctx_size: {type: int, default: 32768, description: Context window (tokens)}
+  parallel: {type: int, default: 1, description: Concurrent request slots (ctx is split between them)}
+  reasoning_effort:
+    type: enum
+    values: [low, medium, high]
+    default: medium
+    flag: --reasoning-effort
+extra_args:
+  - --flash-attn
+  - "on"
+  - --jinja
+  - --reasoning
+  - "on"
+  - --reasoning-format
+  - deepseek
+  - --reasoning-preserve
+  - --spec-type
+  - draft-mtp

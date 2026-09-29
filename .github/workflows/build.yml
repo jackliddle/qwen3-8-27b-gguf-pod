@@ -3,6 +3,7 @@ name: Build and push image
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch: {}
 
 permissions:
@@ -10,11 +11,38 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Supervisor tests
+        working-directory: supervisor
+        run: |
+          pipx install poetry
+          poetry install
+          API_KEY=ci poetry run pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend build + lint
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
   build:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # vLLM + llama.cpp + ollama layers are ~15GB; the default runner disk
+      # can't hold the build otherwise.
       - name: Free up runner disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -38,5 +66,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/qwen3-8-27b-gguf-pod:latest
-            ghcr.io/${{ github.repository_owner }}/qwen3-8-27b-gguf-pod:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/model-pod:latest
+            ghcr.io/${{ github.repository_owner }}/model-pod:${{ github.sha }}

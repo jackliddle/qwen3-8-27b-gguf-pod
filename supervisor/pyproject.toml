@@ -1,0 +1,32 @@
+[project]
+name = "model-pod-supervisor"
+version = "0.1.0"
+description = "Supervisor + web UI for deploying LLMs on a single RunPod GPU pod (llama.cpp, vLLM, Ollama)."
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "fastapi (>=0.115,<1.0)",
+    "uvicorn[standard] (>=0.34,<1.0)",
+    "httpx (>=0.28,<1.0)",
+    "pydantic (>=2.9,<3.0)",
+    "pydantic-settings (>=2.7,<3.0)",
+    "pyyaml (>=6.0,<7.0)",
+    "huggingface-hub (>=1.0,<2.0)",
+]
+
+[project.scripts]
+mp = "app.cli:main"
+
+[tool.poetry]
+packages = [{ include = "app" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+pytest-asyncio = "^0.25"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
